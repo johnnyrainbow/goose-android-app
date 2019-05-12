@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">GooseChase</string>
+    <string name="mapbox_key">pk.eyJ1IjoiZGVsaXNpb2luYyIsImEiOiJjanFhN2dnNHgydDlyM3huMmpzMmZrbHBrIn0.Mu5iERiLYdV0bFAiXT0v2A</string>
+</resources>
