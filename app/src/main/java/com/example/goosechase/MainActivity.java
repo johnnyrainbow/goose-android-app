@@ -133,7 +133,7 @@ public class MainActivity extends AppCompatActivity {
                 //Do something after 100ms
                 getLocation();
             }
-        }, 2500);
+        }, 1000);
     }
     private void instantiateMap() {
 

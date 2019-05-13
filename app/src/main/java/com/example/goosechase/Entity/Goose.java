@@ -53,14 +53,18 @@ public class Goose {
     private double currentLng;
     private double baseLat;
     private double baseLng;
+    private double deltaLat = 0;
+    private double deltaLng = 0;
     private Context context;
     private Activity activity;
     private MapboxMap mapboxMap;
     private FeatureCollection dashedLineDirectionsFeatureCollection;
     private Marker gooseMarker;
     private List<Point> gooseRoute;
-    private int route_position_index = 5;
+    private int current_position_divison;
+    private int route_position_index = 4;
     private final int LINE_COLOR = Color.parseColor("#001360");
+    private final int SPEED_DIVISOR = 15;
 
     public Goose(double baseLat, double baseLng, MapboxMap mapboxMap, Context context, Activity activity, Style style) {
         this.baseLat = baseLat;
@@ -77,23 +81,49 @@ public class Goose {
     //call move whenever user location is updated (from some listener), REMEBER TO UPDATE
     public void move(double userLat, double userLng) {
         //get the distance between the goose and the user.
-        double distMetres = distance(currentLat, currentLng, userLat, userLng) / 1000;
-        if (distMetres > 50) return; //not close enough to warrant moving the goose.
+        double distMetres = distance(currentLat, currentLng, userLat, userLng) * 1000;
+        System.out.println(distMetres);
+//        if (distMetres > 250) return; //not close enough to warrant moving the goose.
+        if (gooseRoute == null) return;
         if (route_position_index < gooseRoute.size() - 1) { //not yet reached end of the route.
-            route_position_index++;
-            currentLat = gooseRoute.get(route_position_index).latitude();
-            currentLng = gooseRoute.get(route_position_index).longitude();
-            //now update the marker
-            activity.runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    gooseMarker.setPosition(new LatLng(currentLat, currentLng));
-                    //UPDATE ROUTE
-                    drawNavigationPolylineRoute();
-                }
-            });
-        }
+            double targetLat = gooseRoute.get(route_position_index).latitude();
+            double targetLng = gooseRoute.get(route_position_index).longitude();
+            //upodate the position index once goose current lat/lng is equal to route position lat lng
+            if (current_position_divison == SPEED_DIVISOR) { //TODO do < < checks
+                current_position_divison = 0;
+                System.out.println("going next index");
+                route_position_index++;
+                targetLat = gooseRoute.get(route_position_index).latitude();
+                targetLng = gooseRoute.get(route_position_index).longitude();
+                deltaLat = targetLat - currentLat;
+                deltaLng = targetLng - currentLng;
+            } else {
+                System.out.println("moving my delta fraction " + deltaLat + ":" + deltaLng);
+                //move by fraction of delta
+                currentLat += deltaLat / SPEED_DIVISOR;
+                currentLng += deltaLng / SPEED_DIVISOR;
+                current_position_divison++;
+            }
 
+            //Determine a target point in the route segment
+
+            //set the
+            //now pass targetLat/Lng into a transitionmove method to smoothly move it over a short amount of time to the new location
+            // transitionMove(targetLat, targetLng);
+            moveGooseMarkerRoute();
+            //now update the marker
+        }
+    }
+
+    private void moveGooseMarkerRoute() {
+        activity.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                gooseMarker.setPosition(new LatLng(currentLat, currentLng));
+                //UPDATE ROUTE
+                drawNavigationPolylineRoute();
+            }
+        });
     }
 
     private void initDottedLineSourceAndLayer(@NonNull Style loadedMapStyle) {
@@ -151,6 +181,7 @@ public class Goose {
 
         currentLat = coordinates.get(route_position_index).latitude();
         currentLng = coordinates.get(route_position_index).longitude();
+        current_position_divison = SPEED_DIVISOR;
     }
 
     /**
@@ -183,23 +214,6 @@ public class Goose {
                 setInitialStart(response.body().routes().get(0));
                 generateMarker();
                 drawNavigationPolylineRoute();
-
-//                new Thread(new Runnable() {
-//                    @Override
-//                    public void run() {
-//                        // This code will run in another thread. Usually as soon as start() gets called!
-//                        for (int i = 0; i < gooseRoute.size(); i++) {
-//                            try {
-//                                Thread.sleep(1000);
-//                                move(baseLat, baseLng);
-//                            } catch (InterruptedException e) {
-//                                e.printStackTrace();
-//                            }
-//
-//                        }
-//                    }
-//                }).start();
-
             }
 
             @Override
@@ -221,8 +235,16 @@ public class Goose {
                 public void onStyleLoaded(@NonNull Style style) {
                     List<Feature> directionsRouteFeatureList = new ArrayList<>();
                     List<Point> relativeRoute = new ArrayList<>();
-                    for (int i = 0; i < route_position_index+1; i++) {
+                    for (int i = 0; i < route_position_index; i++) {
                         relativeRoute.add(gooseRoute.get(i));
+                    }
+                    final double dlat = deltaLat / SPEED_DIVISOR;
+                    final double dlng = deltaLng / SPEED_DIVISOR;
+
+                    //add the route for the current fraction position
+                    for (int i = 0; i < current_position_divison; i++) {
+                        Point s = gooseRoute.get(route_position_index - 1);
+                        relativeRoute.add(Point.fromLngLat(s.longitude() + dlng * i, s.latitude() + dlat * i));
                     }
                     for (int i = 0; i < relativeRoute.size(); i++) {
                         directionsRouteFeatureList.add(Feature.fromGeometry(LineString.fromLngLats(relativeRoute)));
