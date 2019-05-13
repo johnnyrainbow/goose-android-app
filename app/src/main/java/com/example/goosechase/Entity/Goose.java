@@ -6,6 +6,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.graphics.PointF;
+import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.util.Log;
 import android.widget.TextView;
@@ -25,6 +26,7 @@ import com.mapbox.mapboxsdk.annotations.IconFactory;
 import com.mapbox.mapboxsdk.annotations.Marker;
 import com.mapbox.mapboxsdk.annotations.MarkerOptions;
 import com.mapbox.mapboxsdk.geometry.LatLng;
+import com.mapbox.mapboxsdk.maps.MapView;
 import com.mapbox.mapboxsdk.maps.MapboxMap;
 import com.mapbox.mapboxsdk.maps.Style;
 import com.mapbox.mapboxsdk.style.layers.LineLayer;
@@ -58,60 +60,81 @@ public class Goose {
     private Context context;
     private Activity activity;
     private MapboxMap mapboxMap;
+    private MapView mapView;
     private FeatureCollection dashedLineDirectionsFeatureCollection;
     private Marker gooseMarker;
     private List<Point> gooseRoute;
     private int current_position_divison;
     private int route_position_index = 4;
-    private final int LINE_COLOR = Color.parseColor("#001360");
-    private final int SPEED_DIVISOR = 15;
+    private Style mapboxStyle;
 
-    public Goose(double baseLat, double baseLng, MapboxMap mapboxMap, Context context, Activity activity, Style style) {
+    private final int SPEED_DIVISOR = 15;
+    private GooseMessageHandler gmt;
+
+    public Goose(double baseLat, double baseLng, MapboxMap mapboxMap, MapView mapView, Context context, Activity activity, Style style) {
         this.baseLat = baseLat;
         this.baseLng = baseLng;
         this.mapboxMap = mapboxMap;
         this.context = context;
         this.activity = activity;
-        generateDestinationLat();
-        generateDestinationLng();
-        generateGooseRoute(style);
-
+        this.mapView = mapView;
+        this.mapboxStyle = style;
     }
 
-    //call move whenever user location is updated (from some listener), REMEBER TO UPDATE
+    public void start() {
+        generateDestinationLat();
+        generateDestinationLng();
+        generateGooseRoute(mapboxStyle);
+        gmt = new GooseMessageHandler();
+    }
+    public void destroy() {
+        gooseMarker.remove();
+
+    }
+    public void setDashedLineDirectionsFeatureCollection(FeatureCollection dlfc) {
+        dashedLineDirectionsFeatureCollection = dlfc;
+    }
     public void move(double userLat, double userLng) {
         //get the distance between the goose and the user.
+        moveHandler();
         double distMetres = distance(currentLat, currentLng, userLat, userLng) * 1000;
         System.out.println(distMetres);
 //        if (distMetres > 250) return; //not close enough to warrant moving the goose.
         if (gooseRoute == null) return;
         if (route_position_index < gooseRoute.size() - 1) { //not yet reached end of the route.
-            double targetLat = gooseRoute.get(route_position_index).latitude();
-            double targetLng = gooseRoute.get(route_position_index).longitude();
+            double targetLat;
+            double targetLng;
             //upodate the position index once goose current lat/lng is equal to route position lat lng
             if (current_position_divison == SPEED_DIVISOR) { //TODO do < < checks
                 current_position_divison = 0;
-                System.out.println("going next index");
                 route_position_index++;
                 targetLat = gooseRoute.get(route_position_index).latitude();
                 targetLng = gooseRoute.get(route_position_index).longitude();
                 deltaLat = targetLat - currentLat;
                 deltaLng = targetLng - currentLng;
             } else {
-                System.out.println("moving my delta fraction " + deltaLat + ":" + deltaLng);
                 //move by fraction of delta
                 currentLat += deltaLat / SPEED_DIVISOR;
                 currentLng += deltaLng / SPEED_DIVISOR;
                 current_position_divison++;
             }
-
-            //Determine a target point in the route segment
-
-            //set the
-            //now pass targetLat/Lng into a transitionmove method to smoothly move it over a short amount of time to the new location
-            // transitionMove(targetLat, targetLng);
-            moveGooseMarkerRoute();
             //now update the marker
+            moveGooseMarkerRoute();
+        }
+    }
+
+    private void moveHandler() {
+        if (gmt.canAttemptMessage()) {
+            String message = gmt.generateMessage();
+            if (message != null) {
+                gooseMarker.setTitle(message);
+                gooseMarker.showInfoWindow(mapboxMap, mapView);
+                //timeout to hide
+                final Handler handler = new Handler();
+                handler.postDelayed(() -> {
+                    gooseMarker.hideInfoWindow();
+                }, 4000);
+            }
         }
     }
 
@@ -126,28 +149,17 @@ public class Goose {
         });
     }
 
-    private void initDottedLineSourceAndLayer(@NonNull Style loadedMapStyle) {
-        dashedLineDirectionsFeatureCollection = FeatureCollection.fromFeatures(new Feature[]{});
-        loadedMapStyle.addSource(new GeoJsonSource("SOURCE_ID", dashedLineDirectionsFeatureCollection));
-        loadedMapStyle.addLayerBelow(
-                new LineLayer(
-                        "DIRECTIONS_LAYER_ID", "SOURCE_ID").withProperties(
-                        lineWidth(4.5f),
-                        lineColor(LINE_COLOR),
-                        lineTranslate(new Float[]{0f, 4f}),
-                        lineDasharray(new Float[]{1.2f, 1.2f})
-                ), "road-label-small");
-    }
-
     private void generateGooseRoute(Style style) {
         System.out.println("Generating the goose route");
         Point destinationPoint = Point.fromLngLat(destinationLng, destinationLat);
         Point originPoint = Point.fromLngLat(baseLng, baseLat);
-        initDottedLineSourceAndLayer(style);
+
         getRoute(destinationPoint, originPoint);
     }
 
     private void generateMarker() {
+        //rotate the icon based on goose direction
+
         gooseMarker = mapboxMap.addMarker(new MarkerOptions()
                 .position(new LatLng(currentLat, currentLng))
                 .title("Goose")
@@ -251,6 +263,7 @@ public class Goose {
                     }
                     dashedLineDirectionsFeatureCollection = FeatureCollection.fromFeatures(directionsRouteFeatureList);
                     GeoJsonSource source = style.getSourceAs("SOURCE_ID");
+
                     if (source != null) {
                         source.setGeoJson(dashedLineDirectionsFeatureCollection);
                     }
